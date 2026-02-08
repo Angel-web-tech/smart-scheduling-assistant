@@ -5,7 +5,7 @@ import sqlite3
 from streamlit_calendar import calendar
 
 # ================= DATABASE =================
-conn = sqlite3.connect("meetings.db")
+conn = sqlite3.connect("meetings.db", check_same_thread=False)
 c = conn.cursor()
 
 c.execute("""
@@ -16,11 +16,9 @@ CREATE TABLE IF NOT EXISTS meetings(
 """)
 conn.commit()
 
-
 def save_meeting(start, end):
     c.execute("INSERT INTO meetings VALUES (?,?)", (start, end))
     conn.commit()
-
 
 # ================= PAGE SETTINGS =================
 st.set_page_config(
@@ -55,17 +53,14 @@ meetings_input = st.text_area(
 def to_minutes(t):
     return t.hour * 60 + t.minute
 
-
 def parse(slot):
     s, e = slot.split("-")
     sh, sm = map(int, s.split(":"))
     eh, em = map(int, e.split(":"))
     return sh * 60 + sm, eh * 60 + em
 
-
 def fmt(m):
     return f"{m//60:02}:{m%60:02}"
-
 
 # ================= PROCESS =================
 busy = []
@@ -74,7 +69,7 @@ for x in meetings_input.split(","):
     if x.strip():
         s, e = parse(x.strip())
         busy.append((s, e))
-        save_meeting(fmt(s), fmt(e))  # save to DB
+        save_meeting(fmt(s), fmt(e))
 
 if avoid_lunch:
     busy.append((12 * 60, 13 * 60))
@@ -96,22 +91,17 @@ for s, e in busy:
 if start < day_end:
     free.append((start, day_end))
 
-
 # ================= METRICS =================
 total = day_end - day_start
 busy_time = sum(max(0, e - s) for s, e in busy)
 free_time = total - busy_time
 
 c1, c2, c3 = st.columns(3)
-
 c1.metric("Total Work Time", f"{total} min")
 c2.metric("Busy Time", f"{busy_time} min")
 c3.metric("Free Time", f"{free_time} min")
 
-
-# =====================================================
-# ✅ 1. EXPORT CSV
-# =====================================================
+# ================= EXPORT CSV =================
 st.subheader("⬇ Export Schedule")
 
 export_slots = [(fmt(s), fmt(e)) for s, e in free]
@@ -125,9 +115,8 @@ st.download_button(
     file_name="schedule.csv",
     mime="text/csv"
 )
-# =====================================================
-# ✅ 2. CALENDAR VIEW (FIXED)
-# =====================================================
+
+# ================= CALENDAR VIEW =================
 st.subheader("📅 Calendar View")
 
 events = []
@@ -147,17 +136,16 @@ calendar_options = {
     "allDaySlot": False,
 }
 
+if not events:
+    st.info("No free slots to display on calendar.")
+
 calendar(
     events=events,
     options=calendar_options,
     key="calendar",
 )
 
-
-
-# =====================================================
-# ✅ 3 + 4. AI SMART SUGGESTIONS
-# =====================================================
+# ================= SMART SUGGESTIONS =================
 st.subheader("✨ Smart Suggestions")
 
 suggestions = []
@@ -165,12 +153,10 @@ suggestions = []
 for s, e in free:
     if e - s >= duration:
         score = 0
-
         if s < 12 * 60:
-            score += 2   # morning preferred
+            score += 2
         if e > 16 * 60:
-            score -= 1   # avoid late
-
+            score -= 1
         suggestions.append((score, s, e))
 
 suggestions.sort(reverse=True)
@@ -184,14 +170,10 @@ else:
     for score, s, e in suggestions:
         st.info(f"{fmt(s)} - {fmt(e)}")
 
-
-# =====================================================
-# ✅ 5. CONFLICT DETECTION
-# =====================================================
+# ================= CONFLICT DETECTION =================
 st.subheader("🚨 Conflict Detection")
 
 conflict = False
-
 for i in range(len(busy) - 1):
     if busy[i][1] > busy[i + 1][0]:
         conflict = True
@@ -200,10 +182,3 @@ if conflict:
     st.warning("⚠ Some meetings overlap!")
 else:
     st.success("✅ No conflicts detected")
-
-
-
-
-
-
-       
