@@ -1,5 +1,26 @@
 import streamlit as st
+import pandas as pd
 import datetime
+import sqlite3
+from streamlit_calendar import calendar
+
+# ================= DATABASE =================
+conn = sqlite3.connect("meetings.db")
+c = conn.cursor()
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS meetings(
+    start TEXT,
+    end TEXT
+)
+""")
+conn.commit()
+
+
+def save_meeting(start, end):
+    c.execute("INSERT INTO meetings VALUES (?,?)", (start, end))
+    conn.commit()
+
 
 # ================= PAGE SETTINGS =================
 st.set_page_config(
@@ -51,13 +72,13 @@ busy = []
 
 for x in meetings_input.split(","):
     if x.strip():
-        busy.append(parse(x.strip()))
+        s, e = parse(x.strip())
+        busy.append((s, e))
+        save_meeting(fmt(s), fmt(e))  # save to DB
 
-# add lunch block
 if avoid_lunch:
     busy.append((12 * 60, 13 * 60))
 
-# apply buffer
 busy = [(s - buffer_time, e + buffer_time) for s, e in busy]
 busy = sorted(busy)
 
@@ -75,6 +96,7 @@ for s, e in busy:
 if start < day_end:
     free.append((start, day_end))
 
+
 # ================= METRICS =================
 total = day_end - day_start
 busy_time = sum(max(0, e - s) for s, e in busy)
@@ -86,8 +108,57 @@ c1.metric("Total Work Time", f"{total} min")
 c2.metric("Busy Time", f"{busy_time} min")
 c3.metric("Free Time", f"{free_time} min")
 
-# ================= SUGGESTIONS =================
-st.subheader("✨ Suggested Time Slots")
+
+# =====================================================
+# ✅ 1. EXPORT CSV
+# =====================================================
+st.subheader("⬇ Export Schedule")
+
+export_slots = [(fmt(s), fmt(e)) for s, e in free]
+df = pd.DataFrame(export_slots, columns=["Start", "End"])
+
+csv = df.to_csv(index=False).encode("utf-8")
+
+st.download_button(
+    label="Download Schedule (CSV)",
+    data=csv,
+    file_name="schedule.csv",
+    mime="text/csv"
+)
+# =====================================================
+# ✅ 2. CALENDAR VIEW (FIXED)
+# =====================================================
+st.subheader("📅 Calendar View")
+
+events = []
+today = datetime.date.today().isoformat()
+
+for s, e in free:
+    events.append({
+        "title": "Free Slot",
+        "start": f"{today}T{fmt(s)}:00",
+        "end": f"{today}T{fmt(e)}:00"
+    })
+
+calendar_options = {
+    "initialView": "timeGridDay",
+    "slotMinTime": "08:00:00",
+    "slotMaxTime": "18:00:00",
+    "allDaySlot": False,
+}
+
+calendar(
+    events=events,
+    options=calendar_options,
+    key="calendar",
+)
+
+
+
+# =====================================================
+# ✅ 3 + 4. AI SMART SUGGESTIONS
+# =====================================================
+st.subheader("✨ Smart Suggestions")
 
 suggestions = []
 
@@ -95,10 +166,10 @@ for s, e in free:
     if e - s >= duration:
         score = 0
 
-        if s < 12 * 60:  # prefer morning
-            score += 2
-        if e > 16 * 60:  # avoid late
-            score -= 1
+        if s < 12 * 60:
+            score += 2   # morning preferred
+        if e > 16 * 60:
+            score -= 1   # avoid late
 
         suggestions.append((score, s, e))
 
@@ -107,10 +178,16 @@ suggestions.sort(reverse=True)
 if not suggestions:
     st.error("No available slots found")
 else:
-    for score, s, e in suggestions:
-        st.success(f"{fmt(s)} - {fmt(e)}")
+    best = suggestions[0]
+    st.success(f"💡 Best Slot: {fmt(best[1])} - {fmt(best[2])}")
 
-# ================= CONFLICT DETECTION =================
+    for score, s, e in suggestions:
+        st.info(f"{fmt(s)} - {fmt(e)}")
+
+
+# =====================================================
+# ✅ 5. CONFLICT DETECTION
+# =====================================================
 st.subheader("🚨 Conflict Detection")
 
 conflict = False
@@ -122,4 +199,11 @@ for i in range(len(busy) - 1):
 if conflict:
     st.warning("⚠ Some meetings overlap!")
 else:
-    st.info("✅ No conflicts detected")
+    st.success("✅ No conflicts detected")
+
+
+
+
+
+
+       
