@@ -1,0 +1,4 @@
+meetings.db
+.streamlit/
+.vscode/
+__pycache__/
