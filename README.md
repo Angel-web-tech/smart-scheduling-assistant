@@ -8,15 +8,15 @@ Built with Python and Streamlit.
 
 ## Features
 
-✅ Add / Delete Meetings (CRUD)  
-✅ Conflict Detection  
-✅ Smart Slot Suggestions (AI scoring logic)  
-✅ Calendar View  
-✅ Task Manager  
-✅ SQLite Database Storage  
-✅ CSV Export  
-✅ Time Usage Analytics  
-✅ Buffer Time & Lunch Avoidance  
+Add / Delete Meetings (CRUD)  
+Conflict Detection  
+Smart Slot Suggestions (AI scoring logic)  
+Calendar View  
+Task Manager  
+SQLite Database Storage  
+CSV Export  
+Time Usage Analytics  
+Buffer Time & Lunch Avoidance  
 
 ---
 
