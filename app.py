@@ -1,286 +1,214 @@
 import streamlit as st
+from datetime import time, datetime, timedelta
+import matplotlib.pyplot as plt
 import pandas as pd
-import datetime
-import sqlite3
-from streamlit_calendar import calendar
 
-# =====================================================
-# DATABASE
-# =====================================================
-conn = sqlite3.connect("meetings.db", check_same_thread=False)
-c = conn.cursor()
+st.set_page_config(page_title="Smart Scheduling Assistant", layout="wide")
 
-c.execute("""
-CREATE TABLE IF NOT EXISTS meetings(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT,
-    start TEXT,
-    end TEXT
-)
-""")
+# -----------------------
+# Helpers
+# -----------------------
 
-c.execute("""
-CREATE TABLE IF NOT EXISTS tasks(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    priority TEXT
-)
-""")
-
-conn.commit()
+def time_to_float(t):
+    return t.hour + t.minute / 60
 
 
-# ------------------ DB FUNCTIONS ---------------------
-
-def save_meeting(title, start, end):
-    c.execute("INSERT INTO meetings(title,start,end) VALUES (?,?,?)", (title, start, end))
-    conn.commit()
-
-
-def load_meetings():
-    c.execute("SELECT id,title,start,end FROM meetings")
-    return c.fetchall()
+def float_to_time(h):
+    hour = int(h)
+    minute = int((h - hour) * 60)
+    return f"{hour:02d}:{minute:02d}"
 
 
-def delete_meeting(mid):
-    c.execute("DELETE FROM meetings WHERE id=?", (mid,))
-    conn.commit()
+# -----------------------
+# Calendar Plot
+# -----------------------
+
+def draw_calendar(meetings, start_hour, end_hour):
+    fig, ax = plt.subplots(figsize=(10, 2))
+
+    for s, e in meetings:
+        s = time_to_float(s)
+        e = time_to_float(e)
+        ax.barh(0, e - s, left=s)
+
+    ax.set_xlim(start_hour, end_hour)
+    ax.set_yticks([])
+    ax.set_xlabel("Time (hours)")
+    ax.set_title("Daily Schedule Timeline")
+
+    st.pyplot(fig)
 
 
-def save_task(name, priority):
-    c.execute("INSERT INTO tasks(name,priority) VALUES (?,?)", (name, priority))
-    conn.commit()
+# -----------------------
+# Free Slot Finder
+# -----------------------
+
+def find_free_slots(start_hour, end_hour, duration, buffer_mins, meetings):
+
+    meetings_sorted = sorted(meetings, key=lambda x: x[0])
+    current = start_hour
+    free = []
+
+    duration_hr = duration / 60
+    buffer_hr = buffer_mins / 60
+
+    for s, e in meetings_sorted:
+
+        s = time_to_float(s)
+        e = time_to_float(e)
+
+        if s - current >= duration_hr:
+            free.append((current, s))
+
+        current = e + buffer_hr
+
+    if end_hour - current >= duration_hr:
+        free.append((current, end_hour))
+
+    return free
 
 
-def load_tasks():
-    c.execute("SELECT name,priority FROM tasks")
-    return c.fetchall()
-
-
-# =====================================================
-# PAGE CONFIG
-# =====================================================
-st.set_page_config(
-    page_title="Smart Scheduling Assistant",
-    page_icon="📅",
-    layout="wide"
-)
+# -----------------------
+# Title
+# -----------------------
 
 st.title("📅 Smart Scheduling Assistant")
-st.write("AI-powered meeting scheduler with conflict detection & smart suggestions")
+st.caption("AI-powered meeting scheduler with conflict detection & smart suggestions")
 
+# -----------------------
+# Sidebar Settings
+# -----------------------
 
-# =====================================================
-# SIDEBAR SETTINGS
-# =====================================================
 st.sidebar.header("⚙ Settings")
 
-work_start = st.sidebar.time_input("Work start", datetime.time(9, 0))
-work_end = st.sidebar.time_input("Work end", datetime.time(17, 0))
-duration = st.sidebar.slider("Meeting duration (min)", 15, 180, 30)
-buffer_time = st.sidebar.slider("Buffer between meetings (min)", 0, 30, 10)
-avoid_lunch = st.sidebar.checkbox("Avoid lunch (12–1)", True)
+work_start = st.sidebar.time_input("Work start time", time(9, 0))
+work_end = st.sidebar.time_input("Work end time", time(17, 0))
+
+duration = st.sidebar.slider("Meeting duration (minutes)", 15, 120, 30)
+buffer_time = st.sidebar.slider("Buffer between meetings (minutes)", 0, 30, 10)
+
+avoid_lunch = st.sidebar.checkbox("Avoid lunch (12–1 PM)", True)
 
 
-# =====================================================
-# HELPER FUNCTIONS
-# =====================================================
-def to_minutes(t):
-    return t.hour * 60 + t.minute
+# -----------------------
+# Session state
+# -----------------------
+
+if "meetings" not in st.session_state:
+    st.session_state.meetings = []
 
 
-def parse(slot):
-    s, e = slot.split("-")
-    sh, sm = map(int, s.split(":"))
-    eh, em = map(int, e.split(":"))
-    return sh * 60 + sm, eh * 60 + em
+# -----------------------
+# Add Meeting UI
+# -----------------------
 
-
-def fmt(m):
-    return f"{m//60:02}:{m%60:02}"
-
-
-# =====================================================
-# ADD MEETING FORM
-# =====================================================
 st.subheader("➕ Add Meeting")
 
-with st.form("add_meeting"):
-    title = st.text_input("Meeting Title")
-    start_time = st.time_input("Start Time")
-    end_time = st.time_input("End Time")
+col1, col2, col3 = st.columns(3)
 
-    if st.form_submit_button("Add Meeting"):
-        save_meeting(title, start_time.strftime("%H:%M"), end_time.strftime("%H:%M"))
-        st.success("Meeting added!")
+start = col1.time_input("Start time")
+end = col2.time_input("End time")
+
+if col3.button("Add Meeting"):
+    if start < end:
+        st.session_state.meetings.append((start, end))
+    else:
+        st.warning("End time must be after start time")
+
+
+# -----------------------
+# Existing Meetings
+# -----------------------
+
+st.subheader("📌 Existing Meetings")
+
+for i, (s, e) in enumerate(st.session_state.meetings):
+    c1, c2 = st.columns([5, 1])
+
+    c1.write(f"{s.strftime('%H:%M')} - {e.strftime('%H:%M')}")
+
+    if c2.button("❌", key=i):
+        st.session_state.meetings.pop(i)
         st.rerun()
 
 
-# =====================================================
-# SHOW + DELETE MEETINGS (CRUD)
-# =====================================================
-st.subheader("📋 Saved Meetings")
+# -----------------------
+# Lunch Block
+# -----------------------
 
-rows = load_meetings()
-
-for mid, title, s, e in rows:
-    col1, col2 = st.columns([4, 1])
-    col1.write(f"**{title}**  |  {s} - {e}")
-    if col2.button("Delete", key=f"del{mid}"):
-        delete_meeting(mid)
-        st.rerun()
-
-
-# =====================================================
-# BUILD BUSY SLOTS
-# =====================================================
-busy = []
-
-for _, _, s, e in rows:
-    busy.append(parse(f"{s}-{e}"))
+meetings_for_calc = list(st.session_state.meetings)
 
 if avoid_lunch:
-    busy.append((12 * 60, 13 * 60))
-
-busy = [(s - buffer_time, e + buffer_time) for s, e in busy]
-busy = sorted(busy)
+    meetings_for_calc.append((time(12, 0), time(13, 0)))
 
 
-# =====================================================
-# FIND FREE SLOTS
-# =====================================================
-day_start = to_minutes(work_start)
-day_end = to_minutes(work_end)
+# -----------------------
+# Stats
+# -----------------------
 
-free = []
-start = day_start
+start_hour = time_to_float(work_start)
+end_hour = time_to_float(work_end)
 
-for s, e in busy:
-    if start < s:
-        free.append((start, s))
-    start = max(start, e)
+total_time = (end_hour - start_hour) * 60
 
-if start < day_end:
-    free.append((start, day_end))
+busy = sum(
+    (time_to_float(e) - time_to_float(s)) * 60
+    for s, e in meetings_for_calc
+)
 
-
-# =====================================================
-# METRICS
-# =====================================================
-total = day_end - day_start
-busy_time = sum(max(0, e - s) for s, e in busy)
-free_time = total - busy_time
+free = total_time - busy
 
 c1, c2, c3 = st.columns(3)
-c1.metric("Total Work", f"{total} min")
-c2.metric("Busy", f"{busy_time} min")
-c3.metric("Free", f"{free_time} min")
+
+c1.metric("Total Work Time", f"{int(total_time)} min")
+c2.metric("Busy Time", f"{int(busy)} min")
+c3.metric("Free Time", f"{int(free)} min")
 
 
-# =====================================================
-# BAR CHART
-# =====================================================
-st.subheader("📊 Time Usage Chart")
+# -----------------------
+# Calendar View
+# -----------------------
 
-chart_df = pd.DataFrame({
-    "Type": ["Busy", "Free"],
-    "Minutes": [busy_time, free_time]
-})
-
-st.bar_chart(chart_df.set_index("Type"))
+st.subheader("🗓 Calendar View")
+draw_calendar(meetings_for_calc, start_hour, end_hour)
 
 
-# =====================================================
-# EXPORT CSV
-# =====================================================
+# -----------------------
+# Free Slot Suggestions
+# -----------------------
+
+st.subheader("💡 Suggested Free Slots")
+
+slots = find_free_slots(
+    start_hour,
+    end_hour,
+    duration,
+    buffer_time,
+    meetings_for_calc
+)
+
+for s, e in slots:
+    st.write(f"✅ {float_to_time(s)} - {float_to_time(e)}")
+
+
+# -----------------------
+# Export CSV
+# -----------------------
+
 st.subheader("⬇ Export Schedule")
 
-export_slots = [(fmt(s), fmt(e)) for s, e in free]
-df = pd.DataFrame(export_slots, columns=["Start", "End"])
+data = [
+    {
+        "Start": s.strftime("%H:%M"),
+        "End": e.strftime("%H:%M")
+    }
+    for s, e in meetings_for_calc
+]
+
+df = pd.DataFrame(data)
 
 st.download_button(
     "Download CSV",
-    df.to_csv(index=False).encode(),
-    "schedule.csv",
-    "text/csv"
+    df.to_csv(index=False),
+    file_name="schedule.csv"
 )
-
-
-# =====================================================
-# CALENDAR VIEW
-# =====================================================
-st.subheader("📅 Calendar View")
-
-events = []
-today = datetime.date.today().isoformat()
-
-for _, title, s, e in rows:
-    events.append({
-        "title": title,
-        "start": f"{today}T{s}:00",
-        "end": f"{today}T{e}:00"
-    })
-
-calendar(events=events, options={
-    "initialView": "timeGridDay",
-    "allDaySlot": False
-}, key="calendar")
-
-
-# =====================================================
-# SMART SUGGESTIONS
-# =====================================================
-st.subheader("✨ Smart Suggestions")
-
-suggestions = []
-
-for s, e in free:
-    if e - s >= duration:
-        score = 0
-        if s < 12 * 60:
-            score += 2
-        if e > 16 * 60:
-            score -= 1
-        suggestions.append((score, s, e))
-
-suggestions.sort(reverse=True)
-
-if suggestions:
-    best = suggestions[0]
-    st.success(f"Best Slot → {fmt(best[1])} - {fmt(best[2])}")
-    for score, s, e in suggestions:
-        st.info(f"{fmt(s)} - {fmt(e)}")
-else:
-    st.error("No slots available")
-
-
-# =====================================================
-# CONFLICT DETECTION
-# =====================================================
-st.subheader("🚨 Conflict Detection")
-
-conflict = False
-for i in range(len(busy) - 1):
-    if busy[i][1] > busy[i + 1][0]:
-        conflict = True
-
-if conflict:
-    st.warning("Meetings overlap!")
-else:
-    st.success("No conflicts detected")
-
-
-# =====================================================
-# TASK MANAGER
-# =====================================================
-st.subheader("📝 Tasks")
-
-task_name = st.text_input("Task")
-priority = st.selectbox("Priority", ["High", "Medium", "Low"])
-
-if st.button("Add Task"):
-    save_task(task_name, priority)
-    st.success("Task saved!")
-
-for name, p in load_tasks():
-    st.write(f"{name} ({p})")
